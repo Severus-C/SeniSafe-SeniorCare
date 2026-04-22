@@ -119,7 +119,9 @@ class _MedicationAssistantScreenState extends State<MedicationAssistantScreen> {
   }
 
   Future<void> _captureAndUpload() async {
-    if (_isBusy || _cameraController == null || !_cameraController!.value.isInitialized) {
+    if (_isBusy ||
+        _cameraController == null ||
+        !_cameraController!.value.isInitialized) {
       return;
     }
 
@@ -143,10 +145,24 @@ class _MedicationAssistantScreenState extends State<MedicationAssistantScreen> {
         user: appState.currentUser,
         currentMedications: appState.todayMedications,
         imageFile: File(capturedFile.path),
-        mockHintText: 'aspirin',
+        mockHintText: '',
       );
 
       if (!mounted) {
+        return;
+      }
+
+      if (!result.isRecognized) {
+        await appState.voiceService.speak(
+          appState.ocrRetryVoiceFeedback,
+          style: VoiceAnnouncementStyle.coach,
+        );
+        setState(() {
+          _recognitionResult = result;
+          _stage = MedicationAssistantStage.preview;
+          _errorMessage = '暂时没有识别清楚，请重新拍摄更清晰的药盒正面。';
+          _voiceBubbleText = appState.ocrRetryVoiceFeedback;
+        });
         return;
       }
 
@@ -177,10 +193,14 @@ class _MedicationAssistantScreenState extends State<MedicationAssistantScreen> {
       if (!mounted) {
         return;
       }
+      await appState.voiceService.speak(
+        appState.ocrRetryVoiceFeedback,
+        style: VoiceAnnouncementStyle.coach,
+      );
       setState(() {
         _stage = MedicationAssistantStage.preview;
         _errorMessage = '药盒识别暂时没有成功，请检查网络后再试。';
-        _voiceBubbleText = '网络有一点忙，我们稍后再帮您认药。';
+        _voiceBubbleText = appState.ocrRetryVoiceFeedback;
       });
     } finally {
       if (mounted) {
@@ -207,7 +227,7 @@ class _MedicationAssistantScreenState extends State<MedicationAssistantScreen> {
 
     if (result.isSaved) {
       await appState.voiceService.speak(
-        '好勒，药录进去了，王爷爷到时候我准时喊你哈。',
+        appState.medicationSavedVoiceFeedback,
         style: VoiceAnnouncementStyle.guidance,
       );
       await HapticFeedback.mediumImpact();
@@ -353,6 +373,8 @@ class _MedicationAssistantScreenState extends State<MedicationAssistantScreen> {
                         ),
                       ),
                     const _NewChineseScanFrame(),
+                    if (_stage == MedicationAssistantStage.scanning)
+                      const _ScanningLineAnimation(),
                     if (_stage == MedicationAssistantStage.scanning)
                       const _RecognitionLoadingOverlay(),
                   ],
@@ -602,7 +624,7 @@ class _RecognitionLoadingOverlayState extends State<_RecognitionLoadingOverlay>
               ),
               const SizedBox(height: 20),
               Text(
-                '正在为您识别药盒...',
+                '正在智能解析药品成分...',
                 style: theme.textTheme.bodyLarge?.copyWith(
                   color: Colors.white,
                 ),
@@ -611,6 +633,65 @@ class _RecognitionLoadingOverlayState extends State<_RecognitionLoadingOverlay>
           ),
         ),
       ),
+    );
+  }
+}
+
+class _ScanningLineAnimation extends StatefulWidget {
+  const _ScanningLineAnimation();
+
+  @override
+  State<_ScanningLineAnimation> createState() => _ScanningLineAnimationState();
+}
+
+class _ScanningLineAnimationState extends State<_ScanningLineAnimation>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1800),
+    )..repeat(reverse: true);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (BuildContext context, Widget? child) {
+        return Align(
+          alignment: Alignment(0, (_controller.value * 1.6) - 0.8),
+          child: Container(
+            margin: const EdgeInsets.symmetric(horizontal: 42),
+            height: 4,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(999),
+              gradient: const LinearGradient(
+                colors: <Color>[
+                  Colors.transparent,
+                  SeniSafeTheme.warmApricot,
+                  Colors.transparent,
+                ],
+              ),
+              boxShadow: const <BoxShadow>[
+                BoxShadow(
+                  color: Color(0x66F9E4B7),
+                  blurRadius: 12,
+                ),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 }

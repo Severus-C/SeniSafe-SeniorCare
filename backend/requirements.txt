@@ -2,3 +2,8 @@ fastapi==0.116.1
 uvicorn[standard]==0.35.0
 pydantic==2.11.7
 python-multipart>=0.0.18
+# PaddleOCR 依赖说明：
+# 1. 先按官方文档安装 PaddlePaddle（CPU 示例）：
+#    python -m pip install paddlepaddle==3.2.0 -i https://www.paddlepaddle.org.cn/packages/stable/cpu/
+# 2. 再安装 PaddleOCR：
+paddleocr>=3.1,<4.0

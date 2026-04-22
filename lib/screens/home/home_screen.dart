@@ -32,6 +32,8 @@ class HomeScreen extends StatelessWidget {
                 const SizedBox(height: SeniSafeTheme.sectionSpacing),
                 const _HealthStatusCard(),
                 const SizedBox(height: SeniSafeTheme.sectionSpacing),
+                const _DialectPreferenceCard(),
+                const SizedBox(height: SeniSafeTheme.sectionSpacing),
                 Row(
                   children: <Widget>[
                     Expanded(
@@ -77,6 +79,107 @@ class HomeScreen extends StatelessWidget {
             child: _VoiceAssistantBall(),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _DialectPreferenceCard extends StatelessWidget {
+  const _DialectPreferenceCard();
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final SeniSafeAppState appState = context.watch<SeniSafeAppState>();
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Text('语音偏好', style: theme.textTheme.headlineSmall),
+            const SizedBox(height: 8),
+            Text(
+              '选择更亲切的提醒口吻，让颐安说话更像家里人。',
+              style: theme.textTheme.bodyMedium,
+            ),
+            const SizedBox(height: 20),
+            Row(
+              children: <Widget>[
+                Expanded(
+                  child: _DialectChip(
+                    label: '热辣川话',
+                    isSelected:
+                        appState.dialectPreference == DialectPreference.sichuanese,
+                    onTap: () {
+                      context
+                          .read<SeniSafeAppState>()
+                          .setDialectPreference(DialectPreference.sichuanese);
+                    },
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: _DialectChip(
+                    label: '温情粤语',
+                    isSelected:
+                        appState.dialectPreference == DialectPreference.cantonese,
+                    onTap: () {
+                      context
+                          .read<SeniSafeAppState>()
+                          .setDialectPreference(DialectPreference.cantonese);
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _DialectChip extends StatelessWidget {
+  const _DialectChip({
+    required this.label,
+    required this.isSelected,
+    required this.onTap,
+  });
+
+  final String label;
+  final bool isSelected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 220),
+        height: SeniSafeTheme.interactiveMinHeight,
+        decoration: BoxDecoration(
+          color: isSelected
+              ? SeniSafeTheme.pineGreen
+              : SeniSafeTheme.pineGreen.withOpacity(0.06),
+          borderRadius: BorderRadius.circular(28),
+          border: Border.all(
+            color: isSelected
+                ? SeniSafeTheme.pineGreen
+                : SeniSafeTheme.pineGreen.withOpacity(0.14),
+            width: 2,
+          ),
+        ),
+        child: Center(
+          child: Text(
+            label,
+            style: theme.textTheme.labelLarge?.copyWith(
+              color: isSelected ? Colors.white : SeniSafeTheme.pineGreen,
+            ),
+          ),
+        ),
       ),
     );
   }

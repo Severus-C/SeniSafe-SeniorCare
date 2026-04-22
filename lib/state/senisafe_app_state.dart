@@ -10,6 +10,7 @@ import '../services/senisafe_api_service.dart';
 import '../services/voice_service.dart';
 
 enum AppTab { home, medication, emergency }
+enum DialectPreference { sichuanese, cantonese }
 
 class SeniSafeAppState extends ChangeNotifier {
   SeniSafeAppState({
@@ -27,6 +28,7 @@ class SeniSafeAppState extends ChangeNotifier {
   final VoiceService voiceService;
 
   AppTab currentTab = AppTab.home;
+  DialectPreference dialectPreference = DialectPreference.sichuanese;
   bool isVoiceAssistantActive = false;
   bool isPreparingEmergencyPacket = false;
   bool isLoadingEmergencyCard = false;
@@ -111,6 +113,15 @@ class SeniSafeAppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> setDialectPreference(DialectPreference preference) async {
+    if (dialectPreference == preference) {
+      return;
+    }
+    dialectPreference = preference;
+    await HapticFeedback.selectionClick();
+    notifyListeners();
+  }
+
   Future<MedicationConfirmResult> confirmRecognizedMedication({
     required RecognizedMedicationDetail medication,
   }) async {
@@ -149,6 +160,24 @@ class SeniSafeAppState extends ChangeNotifier {
     } finally {
       isConfirmingMedication = false;
       notifyListeners();
+    }
+  }
+
+  String get medicationSavedVoiceFeedback {
+    switch (dialectPreference) {
+      case DialectPreference.cantonese:
+        return '录好喇，王爷爷，记得准时食药呀。';
+      case DialectPreference.sichuanese:
+        return '录好咯，王爷爷，药放乖点哈。';
+    }
+  }
+
+  String get ocrRetryVoiceFeedback {
+    switch (dialectPreference) {
+      case DialectPreference.cantonese:
+        return '王爷爷，仲未睇清楚，可唔可以再影一张？';
+      case DialectPreference.sichuanese:
+        return '王爷爷，没看清，能不能再拍一张？';
     }
   }
 

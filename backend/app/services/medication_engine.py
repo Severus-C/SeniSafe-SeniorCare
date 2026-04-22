@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime, timezone
+from difflib import SequenceMatcher
 from pathlib import Path
 from uuid import uuid4
 
@@ -14,26 +16,43 @@ from ..models.medication import (
 )
 from .store import JsonMedicationStore
 
+try:
+    from paddleocr import PaddleOCR
+except ImportError:  # pragma: no cover - 运行环境未安装 OCR 时走兜底
+    PaddleOCR = None
+
+
+@dataclass(frozen=True)
+class DrugCandidate:
+    canonical_name: str
+    aliases: tuple[str, ...]
+    dosage: str
+    usage: str
+    contraindications: str
+    source_text: str
+
 
 class MedicationEngine:
-    """MedicationEngine: 负责模拟 OCR 识别、图片保存与基础 DDI 冲突检查。"""
+    """MedicationEngine: 负责 OCR 识别、药名映射、图片保存与基础 DDI 冲突检查。"""
 
-    _recognition_map = {
-        "aspirin": RecognizedMedicationPayload(
-            name="阿司匹林",
+    _drug_catalog = (
+        DrugCandidate(
+            canonical_name="阿司匹林",
+            aliases=("阿司匹林", "aspirin", "乙酰水杨酸"),
             dosage="100mg / 次",
             usage="建议早餐后温水送服，每日 1 次，请勿自行加量。",
             contraindications="活动性出血、消化道溃疡、阿司匹林过敏者慎用。",
             source_text="aspirin",
         ),
-        "metformin": RecognizedMedicationPayload(
-            name="二甲双胍缓释片",
+        DrugCandidate(
+            canonical_name="二甲双胍缓释片",
+            aliases=("二甲双胍", "二甲双胍缓释片", "metformin"),
             dosage="500mg / 次",
             usage="建议随餐或餐后服用，每日 1 至 2 次。",
             contraindications="严重肾功能不全者慎用。",
             source_text="metformin",
         ),
-    }
+    )
 
     _ddi_rules = {
         frozenset({"阿司匹林", "华法林"}): ConflictWarningPayload(
@@ -49,6 +68,7 @@ class MedicationEngine:
         self._store = store
         self._image_dir = Path(__file__).resolve().parents[2] / "data" / "uploads"
         self._image_dir.mkdir(parents=True, exist_ok=True)
+        self._ocr_engine = None
 
     def recognize(
         self,
@@ -63,12 +83,11 @@ class MedicationEngine:
             image_bytes=image_bytes,
             original_filename=original_filename,
         )
-        search_text = self._build_mock_search_text(
-            original_filename=original_filename,
+        ocr_texts = self._extract_texts_via_ocr(
+            image_path=stored_path,
             mock_hint_text=mock_hint_text,
         )
-
-        recognized = self._resolve_recognition(search_text)
+        recognized = self._map_to_drug(ocr_texts=ocr_texts)
         current_state_names = self._current_state_names(
             user_id=user_id,
             current_medications=current_medications,
@@ -77,7 +96,7 @@ class MedicationEngine:
         if recognized is None:
             return MedicationRecognizeResponse(
                 status="not_found",
-                message="暂时没有认出药盒文字，请换个角度再试一次。",
+                message="暂时没有看清药盒文字，请再拍一张更清楚的照片。",
                 image_id=image_id,
                 image_path=stored_path,
                 medication=None,
@@ -138,14 +157,85 @@ class MedicationEngine:
             medication_list=medication_list,
         )
 
-    def _resolve_recognition(
+    def _extract_texts_via_ocr(
         self,
-        search_text: str,
+        image_path: str,
+        mock_hint_text: str | None,
+    ) -> list[str]:
+        engine = self._get_ocr_engine()
+        extracted_texts: list[str] = []
+
+        if engine is not None:
+            try:
+                prediction = engine.predict(image_path)
+                for item in prediction:
+                    result = item.get("res", {})
+                    texts = result.get("rec_texts", [])
+                    extracted_texts.extend(
+                        text.strip() for text in texts if isinstance(text, str)
+                    )
+            except Exception:
+                extracted_texts = []
+
+        # 兜底：开发环境还未装好 PaddleOCR 时，仍允许通过提示词联调主流程。
+        if not extracted_texts and mock_hint_text:
+            extracted_texts.append(mock_hint_text)
+
+        return extracted_texts
+
+    def _get_ocr_engine(self):
+        if self._ocr_engine is not None:
+            return self._ocr_engine
+        if PaddleOCR is None:
+            return None
+
+        self._ocr_engine = PaddleOCR(
+            use_doc_orientation_classify=False,
+            use_doc_unwarping=False,
+            use_textline_orientation=False,
+        )
+        return self._ocr_engine
+
+    def _map_to_drug(
+        self,
+        ocr_texts: list[str],
     ) -> RecognizedMedicationPayload | None:
-        for keyword, payload in self._recognition_map.items():
-            if keyword in search_text:
-                return payload
+        normalized_blob = " ".join(ocr_texts).lower()
+
+        # 先做直接命中，优先保证常见药盒识别稳定。
+        for candidate in self._drug_catalog:
+            for alias in candidate.aliases:
+                if alias.lower() in normalized_blob:
+                    return self._to_payload(candidate)
+
+        # 再做模糊匹配，处理 OCR 文本存在轻微错漏的情况。
+        best_candidate: DrugCandidate | None = None
+        best_score = 0.0
+        for candidate in self._drug_catalog:
+            for alias in candidate.aliases:
+                score = SequenceMatcher(
+                    None,
+                    normalized_blob,
+                    alias.lower(),
+                ).ratio()
+                if score > best_score:
+                    best_score = score
+                    best_candidate = candidate
+
+        if best_candidate is not None and best_score >= 0.35:
+            return self._to_payload(best_candidate)
+
         return None
+
+    @staticmethod
+    def _to_payload(candidate: DrugCandidate) -> RecognizedMedicationPayload:
+        return RecognizedMedicationPayload(
+            name=candidate.canonical_name,
+            dosage=candidate.dosage,
+            usage=candidate.usage,
+            contraindications=candidate.contraindications,
+            source_text=candidate.source_text,
+        )
 
     def _detect_conflict(
         self,
@@ -171,13 +261,6 @@ class MedicationEngine:
             if item.name not in merged_names:
                 merged_names.append(item.name)
         return merged_names
-
-    @staticmethod
-    def _build_mock_search_text(
-        original_filename: str,
-        mock_hint_text: str | None,
-    ) -> str:
-        return f"{original_filename.lower()} {mock_hint_text or ''}".lower()
 
     def _persist_uploaded_image(
         self,
