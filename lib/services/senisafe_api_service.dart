@@ -35,21 +35,16 @@ class SeniSafeApiService {
   Future<MedicationRecognitionResult> recognizeMedication({
     required User user,
     required List<Medication> currentMedications,
-    required String imageBase64,
+    required File imageFile,
     required String mockHintText,
   }) async {
-    final Uri uri = Uri.parse('$baseUrl/medication/recognize');
-    final http.Response response = await _client.post(
-      uri,
-      headers: <String, String>{
-        'Content-Type': 'application/json',
-      },
-      body: jsonEncode(
-        <String, dynamic>{
-          'user_id': user.id,
-          'image_base64': imageBase64,
-          'mock_hint_text': mockHintText,
-          'current_medications': currentMedications
+    final http.StreamedResponse response = await _sendMultipart(
+      path: '/medication/recognize',
+      fields: <String, String>{
+        'user_id': user.id,
+        'mock_hint_text': mockHintText,
+        'current_medications': jsonEncode(
+          currentMedications
               .map(
                 (Medication medication) => <String, String>{
                   'name': medication.name,
@@ -57,15 +52,49 @@ class SeniSafeApiService {
                 },
               )
               .toList(),
-        },
-      ),
+        ),
+      },
+      fileField: 'image',
+      file: imageFile,
     );
+    final String responseBody = await response.stream.bytesToString();
 
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw Exception('药盒识别服务暂时不可用，请稍后再试。');
     }
 
     return MedicationRecognitionResult.fromJson(
+      jsonDecode(responseBody) as Map<String, dynamic>,
+    );
+  }
+
+  Future<MedicationConfirmResult> confirmMedication({
+    required String userId,
+    required RecognizedMedicationDetail medication,
+  }) async {
+    final Uri uri = Uri.parse('$baseUrl/medication/confirm');
+    final http.Response response = await _client.post(
+      uri,
+      headers: <String, String>{
+        'Content-Type': 'application/json',
+      },
+      body: jsonEncode(
+        <String, dynamic>{
+          'user_id': userId,
+          'name': medication.name,
+          'dosage': medication.dosage,
+          'usage': medication.usage,
+          'contraindications': medication.contraindications,
+          'confirmed_at': DateTime.now().toUtc().toIso8601String(),
+        },
+      ),
+    );
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw Exception('药物确认录入暂未成功，请稍后再试。');
+    }
+
+    return MedicationConfirmResult.fromJson(
       jsonDecode(response.body) as Map<String, dynamic>,
     );
   }
@@ -118,5 +147,26 @@ class SeniSafeApiService {
 
   void dispose() {
     _client.close();
+  }
+
+  Future<http.StreamedResponse> _sendMultipart({
+    required String path,
+    required Map<String, String> fields,
+    required String fileField,
+    required File file,
+  }) async {
+    final Uri uri = Uri.parse('$baseUrl$path');
+    final http.MultipartRequest request = http.MultipartRequest('POST', uri)
+      ..fields.addAll(fields)
+      ..files.add(
+        await http.MultipartFile.fromPath(
+          fileField,
+          file.path,
+          filename: file.uri.pathSegments.isNotEmpty
+              ? file.uri.pathSegments.last
+              : 'capture.jpg',
+        ),
+      );
+    return request.send();
   }
 }

@@ -4,6 +4,7 @@ import 'package:flutter/widgets.dart';
 import '../models/emergency_packet.dart';
 import '../models/emergency_record.dart';
 import '../models/medication.dart';
+import '../models/medication_recognition_result.dart';
 import '../models/user.dart';
 import '../services/senisafe_api_service.dart';
 import '../services/voice_service.dart';
@@ -29,6 +30,7 @@ class SeniSafeAppState extends ChangeNotifier {
   bool isVoiceAssistantActive = false;
   bool isPreparingEmergencyPacket = false;
   bool isLoadingEmergencyCard = false;
+  bool isConfirmingMedication = false;
   EmergencyPreparePacketResponse? latestEmergencyPacket;
   EmergencyPacketCard? activeEmergencyCard;
   String? latestSyncMessage;
@@ -107,6 +109,47 @@ class SeniSafeAppState extends ChangeNotifier {
     isVoiceAssistantActive = !isVoiceAssistantActive;
     await HapticFeedback.mediumImpact();
     notifyListeners();
+  }
+
+  Future<MedicationConfirmResult> confirmRecognizedMedication({
+    required RecognizedMedicationDetail medication,
+  }) async {
+    isConfirmingMedication = true;
+    latestSyncMessage = '正在为您录入药物，请稍候。';
+    notifyListeners();
+
+    try {
+      final MedicationConfirmResult result = await apiService.confirmMedication(
+        userId: currentUser.id,
+        medication: medication,
+      );
+
+      if (result.isSaved) {
+        final bool alreadyExists = todayMedications.any(
+          (Medication item) => item.name == medication.name,
+        );
+        if (!alreadyExists) {
+          todayMedications.add(
+            Medication(
+              id: 'med-${DateTime.now().millisecondsSinceEpoch}',
+              name: medication.name,
+              dosage: medication.dosage,
+              scheduleLabel: '新录入药物',
+              instructions: medication.usage,
+              requiresFaceScan: true,
+              intakeState: MedicationIntakeState.pending,
+            ),
+          );
+        }
+        latestSyncMessage = result.message;
+      } else {
+        latestSyncMessage = result.message;
+      }
+      return result;
+    } finally {
+      isConfirmingMedication = false;
+      notifyListeners();
+    }
   }
 
   // 预留方言意图映射入口，后续可接入 Fun-ASR 1.5 的流式结果。

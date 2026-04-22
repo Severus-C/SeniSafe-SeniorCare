@@ -1,6 +1,5 @@
 import 'dart:async';
-import 'dart:convert';
-import 'dart:typed_data';
+import 'dart:io';
 
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
@@ -29,7 +28,6 @@ class MedicationAssistantScreen extends StatefulWidget {
 
 class _MedicationAssistantScreenState extends State<MedicationAssistantScreen> {
   CameraController? _cameraController;
-  Future<void>? _cameraInitialization;
   StreamSubscription? _voiceRecognitionSubscription;
   StreamSubscription? _voiceAnnouncementSubscription;
 
@@ -51,13 +49,6 @@ class _MedicationAssistantScreenState extends State<MedicationAssistantScreen> {
   }
 
   Future<void> _initializeCamera() async {
-    setState(() {
-      _cameraInitialization = _setupCamera();
-    });
-    await _cameraInitialization;
-  }
-
-  Future<void> _setupCamera() async {
     try {
       final List<CameraDescription> cameras = await availableCameras();
       if (cameras.isEmpty) {
@@ -68,9 +59,8 @@ class _MedicationAssistantScreenState extends State<MedicationAssistantScreen> {
         return;
       }
 
-      final CameraDescription selectedCamera = cameras.first;
       final CameraController controller = CameraController(
-        selectedCamera,
+        cameras.first,
         ResolutionPreset.medium,
         enableAudio: false,
         imageFormatGroup: ImageFormatGroup.jpeg,
@@ -93,7 +83,7 @@ class _MedicationAssistantScreenState extends State<MedicationAssistantScreen> {
       }
       setState(() {
         _cameraReady = false;
-        _errorMessage = '相机暂时无法打开，我们会先保留识别流程入口。';
+        _errorMessage = '相机暂时无法打开，我们会保留拍照识别入口。';
       });
     }
   }
@@ -128,8 +118,8 @@ class _MedicationAssistantScreenState extends State<MedicationAssistantScreen> {
     });
   }
 
-  Future<void> _simulateMedicationCapture() async {
-    if (_isBusy) {
+  Future<void> _captureAndUpload() async {
+    if (_isBusy || _cameraController == null || !_cameraController!.value.isInitialized) {
       return;
     }
 
@@ -144,15 +134,15 @@ class _MedicationAssistantScreenState extends State<MedicationAssistantScreen> {
     });
 
     await HapticFeedback.mediumImpact();
-    await appState.voiceService.speak('爷爷/奶奶，正在帮您认药，请拿稳手机。');
+    await appState.voiceService.speak('爷爷/奶奶，正在为您识别药盒，请拿稳手机。');
 
     try {
-      final String payload = _buildMockImagePayload();
+      final XFile capturedFile = await _cameraController!.takePicture();
       final MedicationRecognitionResult result =
           await appState.apiService.recognizeMedication(
         user: appState.currentUser,
         currentMedications: appState.todayMedications,
-        imageBase64: payload,
+        imageFile: File(capturedFile.path),
         mockHintText: 'aspirin',
       );
 
@@ -168,7 +158,7 @@ class _MedicationAssistantScreenState extends State<MedicationAssistantScreen> {
         _showConflictOverlay = result.hasConflict;
         _voiceBubbleText = result.hasConflict
             ? result.conflictWarning!.voicePrompt
-            : '已识别完成，您可以查看用法用量。';
+            : '识别完成，您可以查看用法用量，再决定是否录入。';
       });
 
       if (result.hasConflict) {
@@ -179,7 +169,7 @@ class _MedicationAssistantScreenState extends State<MedicationAssistantScreen> {
         );
       } else {
         await appState.voiceService.speak(
-          '识别完成，您可以问我这个药怎么吃。',
+          '识别完成，您可以确认录入新药了。',
           style: VoiceAnnouncementStyle.guidance,
         );
       }
@@ -201,11 +191,39 @@ class _MedicationAssistantScreenState extends State<MedicationAssistantScreen> {
     }
   }
 
-  String _buildMockImagePayload() {
-    final Uint8List bytes = Uint8List.fromList(
-      utf8.encode('senisafe-demo-image:aspirin'),
-    );
-    return base64Encode(bytes);
+  Future<void> _confirmMedicationEntry() async {
+    final RecognizedMedicationDetail? medication = _recognitionResult?.medication;
+    if (medication == null) {
+      return;
+    }
+
+    final SeniSafeAppState appState = context.read<SeniSafeAppState>();
+    final MedicationConfirmResult result =
+        await appState.confirmRecognizedMedication(medication: medication);
+
+    if (!mounted) {
+      return;
+    }
+
+    if (result.isSaved) {
+      await appState.voiceService.speak(
+        '好勒，药录进去了，王爷爷到时候我准时喊你哈。',
+        style: VoiceAnnouncementStyle.guidance,
+      );
+      await HapticFeedback.mediumImpact();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('药物已成功录入，并同步到首页列表。')),
+      );
+    } else {
+      await HapticFeedback.heavyImpact();
+      await appState.voiceService.speak(
+        result.message,
+        style: VoiceAnnouncementStyle.warning,
+      );
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(result.message)),
+      );
+    }
   }
 
   @override
@@ -291,9 +309,7 @@ class _MedicationAssistantScreenState extends State<MedicationAssistantScreen> {
                     borderRadius: BorderRadius.circular(24),
                   ),
                   child: Text(
-                    _stage == MedicationAssistantStage.scanning
-                        ? '识别中'
-                        : '待扫描',
+                    _stage == MedicationAssistantStage.scanning ? '识别中' : '待扫描',
                     style: theme.textTheme.labelMedium?.copyWith(
                       color: SeniSafeTheme.pineGreen,
                     ),
@@ -338,29 +354,7 @@ class _MedicationAssistantScreenState extends State<MedicationAssistantScreen> {
                       ),
                     const _NewChineseScanFrame(),
                     if (_stage == MedicationAssistantStage.scanning)
-                      Container(
-                        color: Colors.black.withOpacity(0.16),
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: <Widget>[
-                            const SizedBox(
-                              width: 64,
-                              height: 64,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 6,
-                                color: SeniSafeTheme.warmApricot,
-                              ),
-                            ),
-                            const SizedBox(height: 18),
-                            Text(
-                              '正在识别药盒文字与风险信息',
-                              style: theme.textTheme.bodyLarge?.copyWith(
-                                color: Colors.white,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
+                      const _RecognitionLoadingOverlay(),
                   ],
                 ),
               ),
@@ -372,11 +366,11 @@ class _MedicationAssistantScreenState extends State<MedicationAssistantScreen> {
             ),
             const SizedBox(height: 20),
             FilledButton.icon(
-              onPressed: _isBusy ? null : _simulateMedicationCapture,
+              onPressed: _isBusy ? null : _captureAndUpload,
               icon: const Icon(Icons.camera_alt_outlined, size: 34),
               label: const Padding(
                 padding: EdgeInsets.symmetric(vertical: 8),
-                child: Text('拍药盒并上传识别'),
+                child: Text('拍照识别药盒'),
               ),
             ),
           ],
@@ -402,15 +396,9 @@ class _MedicationAssistantScreenState extends State<MedicationAssistantScreen> {
               style: theme.textTheme.bodyMedium,
             ),
             const SizedBox(height: 24),
-            _ResultInfoTile(
-              label: '药品名',
-              value: medication?.name ?? '待识别',
-            ),
+            _ResultInfoTile(label: '药品名', value: medication?.name ?? '待识别'),
             const SizedBox(height: 18),
-            _ResultInfoTile(
-              label: '剂量',
-              value: medication?.dosage ?? '待识别',
-            ),
+            _ResultInfoTile(label: '剂量', value: medication?.dosage ?? '待识别'),
             const SizedBox(height: 18),
             AnimatedContainer(
               duration: const Duration(milliseconds: 220),
@@ -470,6 +458,10 @@ class _MedicationAssistantScreenState extends State<MedicationAssistantScreen> {
               label: '禁忌症',
               value: medication?.contraindications ?? '待识别',
             ),
+            if (result?.imagePath != null) ...<Widget>[
+              const SizedBox(height: 18),
+              _ResultInfoTile(label: '图片存档', value: result!.imagePath!),
+            ],
             if (result?.hasConflict ?? false) ...<Widget>[
               const SizedBox(height: 20),
               Container(
@@ -488,6 +480,22 @@ class _MedicationAssistantScreenState extends State<MedicationAssistantScreen> {
               ),
             ],
             const SizedBox(height: 20),
+            FilledButton(
+              onPressed: medication == null || appState.isConfirmingMedication
+                  ? null
+                  : _confirmMedicationEntry,
+              child: appState.isConfirmingMedication
+                  ? const SizedBox(
+                      width: 36,
+                      height: 36,
+                      child: CircularProgressIndicator(
+                        color: Colors.white,
+                        strokeWidth: 4,
+                      ),
+                    )
+                  : const Text('确认录入'),
+            ),
+            const SizedBox(height: 16),
             if (appState.latestSyncMessage != null)
               Text(
                 appState.latestSyncMessage!,
@@ -528,6 +536,85 @@ class _MedicationAssistantScreenState extends State<MedicationAssistantScreen> {
   }
 }
 
+class _RecognitionLoadingOverlay extends StatefulWidget {
+  const _RecognitionLoadingOverlay();
+
+  @override
+  State<_RecognitionLoadingOverlay> createState() =>
+      _RecognitionLoadingOverlayState();
+}
+
+class _RecognitionLoadingOverlayState extends State<_RecognitionLoadingOverlay>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1600),
+      lowerBound: 0.92,
+      upperBound: 1.06,
+    )..repeat(reverse: true);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    return Container(
+      color: Colors.black.withOpacity(0.16),
+      child: Center(
+        child: AnimatedBuilder(
+          animation: _controller,
+          builder: (BuildContext context, Widget? child) {
+            return Transform.scale(scale: _controller.value, child: child);
+          },
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              Container(
+                width: 96,
+                height: 96,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: SeniSafeTheme.pineGreen.withOpacity(0.94),
+                  boxShadow: const <BoxShadow>[
+                    BoxShadow(
+                      color: Color(0x332D5A27),
+                      blurRadius: 20,
+                      offset: Offset(0, 12),
+                    ),
+                  ],
+                ),
+                child: const Center(
+                  child: CircularProgressIndicator(
+                    color: SeniSafeTheme.warmApricot,
+                    strokeWidth: 5,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 20),
+              Text(
+                '正在为您识别药盒...',
+                style: theme.textTheme.bodyLarge?.copyWith(
+                  color: Colors.white,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _NewChineseScanFrame extends StatelessWidget {
   const _NewChineseScanFrame();
 
@@ -555,7 +642,11 @@ class _NewChineseScanFrame extends StatelessWidget {
           children: const <Widget>[
             Positioned(top: 18, left: 18, child: _FrameCorner()),
             Positioned(top: 18, right: 18, child: _FrameCorner(isMirrored: true)),
-            Positioned(bottom: 18, left: 18, child: _FrameCorner(isVerticalFlip: true)),
+            Positioned(
+              bottom: 18,
+              left: 18,
+              child: _FrameCorner(isVerticalFlip: true),
+            ),
             Positioned(
               bottom: 18,
               right: 18,

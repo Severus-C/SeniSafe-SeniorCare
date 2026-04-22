@@ -1,10 +1,12 @@
-from fastapi import APIRouter
+import json
+
+from fastapi import APIRouter, File, Form, UploadFile
 
 from ..dependencies import medication_engine
 from ..models.medication import (
+    CurrentMedicationItem,
     MedicationConfirmRequest,
     MedicationConfirmResponse,
-    MedicationRecognizeRequest,
     MedicationRecognizeResponse,
 )
 
@@ -13,13 +15,22 @@ router = APIRouter(prefix="/medication", tags=["MedicationEngine"])
 
 @router.post("/recognize", response_model=MedicationRecognizeResponse)
 async def recognize_medication(
-    payload: MedicationRecognizeRequest,
+    user_id: str = Form(...),
+    current_medications: str = Form("[]"),
+    mock_hint_text: str | None = Form(default=None),
+    image: UploadFile = File(...),
 ) -> MedicationRecognizeResponse:
+    image_bytes = await image.read()
+    parsed_current_medications = [
+        CurrentMedicationItem.model_validate(item)
+        for item in json.loads(current_medications)
+    ]
     return medication_engine.recognize(
-        user_id=payload.user_id,
-        image_base64=payload.image_base64,
-        mock_hint_text=payload.mock_hint_text,
-        current_medications=payload.current_medications,
+        user_id=user_id,
+        image_bytes=image_bytes,
+        original_filename=image.filename or "captured-medication.jpg",
+        mock_hint_text=mock_hint_text,
+        current_medications=parsed_current_medications,
     )
 
 

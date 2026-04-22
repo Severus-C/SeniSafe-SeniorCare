@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-import base64
 from datetime import datetime, timezone
 from pathlib import Path
+from uuid import uuid4
 
 from ..models.medication import (
     ConflictWarningPayload,
@@ -16,7 +16,7 @@ from .store import JsonMedicationStore
 
 
 class MedicationEngine:
-    """MedicationEngine: 负责模拟 OCR 识别与基础 DDI 冲突检查。"""
+    """MedicationEngine: 负责模拟 OCR 识别、图片保存与基础 DDI 冲突检查。"""
 
     _recognition_map = {
         "aspirin": RecognizedMedicationPayload(
@@ -53,44 +53,89 @@ class MedicationEngine:
     def recognize(
         self,
         user_id: str,
-        image_base64: str,
+        image_bytes: bytes,
+        original_filename: str,
         mock_hint_text: str | None,
         current_medications: list[CurrentMedicationItem],
     ) -> MedicationRecognizeResponse:
-        self._persist_mock_image(user_id=user_id, image_base64=image_base64)
-        decoded_text = self._decode_base64_text(image_base64)
-        search_text = f"{decoded_text} {mock_hint_text or ''}".lower()
+        image_id, stored_path = self._persist_uploaded_image(
+            user_id=user_id,
+            image_bytes=image_bytes,
+            original_filename=original_filename,
+        )
+        search_text = self._build_mock_search_text(
+            original_filename=original_filename,
+            mock_hint_text=mock_hint_text,
+        )
 
         recognized = self._resolve_recognition(search_text)
+        current_state_names = self._current_state_names(
+            user_id=user_id,
+            current_medications=current_medications,
+        )
+
         if recognized is None:
             return MedicationRecognizeResponse(
                 status="not_found",
                 message="暂时没有认出药盒文字，请换个角度再试一次。",
+                image_id=image_id,
+                image_path=stored_path,
                 medication=None,
                 conflict_warning=None,
-                current_medication_state=self._current_state_names(
-                    user_id=user_id,
-                    current_medications=current_medications,
-                ),
+                current_medication_state=current_state_names,
             )
 
         conflict_warning = self._detect_conflict(
             recognized_name=recognized.name,
-            active_medications=self._current_state_names(
-                user_id=user_id,
-                current_medications=current_medications,
-            ),
+            active_medications=current_state_names,
         )
 
         return MedicationRecognizeResponse(
             status="recognized",
             message="识别完成，已为您检查用法用量与药物冲突。",
+            image_id=image_id,
+            image_path=stored_path,
             medication=recognized,
             conflict_warning=conflict_warning,
-            current_medication_state=self._current_state_names(
-                user_id=user_id,
-                current_medications=current_medications,
-            ),
+            current_medication_state=current_state_names,
+        )
+
+    def confirm_medication(
+        self,
+        payload: MedicationConfirmRequest,
+    ) -> MedicationConfirmResponse:
+        active_medications = self._store.get_user_profile(
+            payload.user_id
+        ).current_medication_state
+        conflict_warning = self._detect_conflict(
+            recognized_name=payload.name,
+            active_medications=active_medications,
+        )
+        if conflict_warning is not None:
+            return MedicationConfirmResponse(
+                status="conflict_blocked",
+                message=conflict_warning.detail,
+                medication_list=self._store.get_user_profile(
+                    payload.user_id
+                ).medication_list,
+            )
+
+        medication_list = self._store.add_medication_to_list(
+            user_id=payload.user_id,
+            medication_name=payload.name,
+            dosage=payload.dosage,
+            usage=payload.usage,
+        )
+        self._store.update_current_medication_state(
+            user_id=payload.user_id,
+            medication_name=payload.name,
+            dosage=payload.dosage,
+            confirmed_at=payload.confirmed_at or datetime.now(timezone.utc),
+        )
+        return MedicationConfirmResponse(
+            status="saved",
+            message="药物已录入用户药物清单。",
+            medication_list=medication_list,
         )
 
     def _resolve_recognition(
@@ -127,43 +172,21 @@ class MedicationEngine:
                 merged_names.append(item.name)
         return merged_names
 
-    def confirm_medication(
-        self,
-        payload: MedicationConfirmRequest,
-    ) -> MedicationConfirmResponse:
-        medication_list = self._store.add_medication_to_list(
-            user_id=payload.user_id,
-            medication_name=payload.name,
-            dosage=payload.dosage,
-            usage=payload.usage,
-        )
-        self._store.update_current_medication_state(
-            user_id=payload.user_id,
-            medication_name=payload.name,
-            dosage=payload.dosage,
-            confirmed_at=payload.confirmed_at or datetime.now(timezone.utc),
-        )
-        return MedicationConfirmResponse(
-            status="saved",
-            message="药物已录入用户药物清单。",
-            medication_list=medication_list,
-        )
-
     @staticmethod
-    def _decode_base64_text(image_base64: str) -> str:
-        try:
-            raw_bytes = base64.b64decode(image_base64.encode("utf-8"), validate=False)
-            return raw_bytes.decode("utf-8", errors="ignore")
-        except Exception:
-            return ""
+    def _build_mock_search_text(
+        original_filename: str,
+        mock_hint_text: str | None,
+    ) -> str:
+        return f"{original_filename.lower()} {mock_hint_text or ''}".lower()
 
-    def _persist_mock_image(self, user_id: str, image_base64: str) -> None:
-        try:
-            raw_bytes = base64.b64decode(image_base64.encode("utf-8"), validate=False)
-        except Exception:
-            raw_bytes = image_base64.encode("utf-8")
-        output_path = (
-            self._image_dir
-            / f"{user_id}-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}.jpg"
-        )
-        output_path.write_bytes(raw_bytes)
+    def _persist_uploaded_image(
+        self,
+        user_id: str,
+        image_bytes: bytes,
+        original_filename: str,
+    ) -> tuple[str, str]:
+        suffix = Path(original_filename).suffix or ".jpg"
+        image_id = f"{user_id}-{uuid4().hex[:12]}"
+        output_path = self._image_dir / f"{image_id}{suffix}"
+        output_path.write_bytes(image_bytes)
+        return image_id, str(output_path)

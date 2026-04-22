@@ -8,16 +8,6 @@ class CurrentMedicationItem(BaseModel):
     dosage: str = Field(..., description="当前药品剂量")
 
 
-class MedicationRecognizeRequest(BaseModel):
-    user_id: str
-    image_base64: str = Field(..., description="上传图片的 Base64 内容")
-    mock_hint_text: str | None = Field(
-        default=None,
-        description="用于本地 mock 识别的提示词",
-    )
-    current_medications: list[CurrentMedicationItem] = Field(default_factory=list)
-
-
 class RecognizedMedicationPayload(BaseModel):
     name: str
     dosage: str
@@ -37,6 +27,8 @@ class ConflictWarningPayload(BaseModel):
 class MedicationRecognizeResponse(BaseModel):
     status: str
     message: str
+    image_id: str | None = None
+    image_path: str | None = None
     medication: RecognizedMedicationPayload | None = None
     conflict_warning: ConflictWarningPayload | None = None
     current_medication_state: list[str] = Field(default_factory=list)
@@ -47,6 +39,7 @@ class MedicationConfirmRequest(BaseModel):
     name: str
     dosage: str
     usage: str
+    contraindications: str | None = None
     confirmed_at: datetime | None = None
 
 
