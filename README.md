@@ -1,6 +1,6 @@
-# <div align="center">🪴 Project Logo Placeholder</div>
-
 <div align="center">
+
+![SeniSafe Logo](assets/logo.svg)
 
 # 颐安 · SeniSafe
 

@@ -1,0 +1,67 @@
+<svg width="1400" height="360" viewBox="0 0 1400 360" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <filter id="softShadow" x="0" y="0" width="420" height="360" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="12" stdDeviation="18" flood-color="#0D3F34" flood-opacity="0.18"/>
+    </filter>
+    <linearGradient id="iconBg" x1="40" y1="20" x2="320" y2="320" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#145342"/>
+      <stop offset="1" stop-color="#125436"/>
+    </linearGradient>
+    <linearGradient id="pineGrad" x1="115" y1="85" x2="220" y2="255" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#7FCB97"/>
+      <stop offset="1" stop-color="#57A776"/>
+    </linearGradient>
+    <linearGradient id="wordmarkGrad" x1="430" y1="80" x2="1320" y2="285" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#145342"/>
+      <stop offset="1" stop-color="#2B7462"/>
+    </linearGradient>
+  </defs>
+
+  <g filter="url(#softShadow)">
+    <rect x="40" y="20" width="320" height="320" rx="78" fill="url(#iconBg)"/>
+  </g>
+
+  <g stroke="url(#pineGrad)" stroke-width="11" stroke-linecap="round" stroke-linejoin="round" opacity="0.95">
+    <path d="M173 95V168"/>
+    <path d="M173 110L153 90"/>
+    <path d="M173 110L193 90"/>
+    <path d="M173 128L139 98"/>
+    <path d="M173 128L207 98"/>
+    <path d="M173 146L125 110"/>
+    <path d="M173 146L221 110"/>
+    <path d="M173 164L112 123"/>
+    <path d="M173 164L234 123"/>
+    <path d="M173 182L100 138"/>
+    <path d="M173 182L246 138"/>
+    <path d="M173 200L98 156"/>
+    <path d="M173 200L248 156"/>
+    <path d="M173 218L106 176"/>
+    <path d="M173 218L240 176"/>
+    <path d="M173 236L120 198"/>
+    <path d="M173 236L226 198"/>
+    <path d="M173 256L160 206"/>
+    <path d="M173 256L133 230"/>
+  </g>
+
+  <path
+    d="M82 206H150L172 151L207 273L244 130L270 224L287 206H308"
+    stroke="#F7F2E8"
+    stroke-width="13"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+
+  <rect x="308" y="197" width="30" height="18" rx="9" fill="#FDB38C"/>
+
+  <text
+    x="420"
+    y="255"
+    fill="url(#wordmarkGrad)"
+    font-family="Avenir Next, Poppins, Segoe UI, Arial, sans-serif"
+    font-size="168"
+    font-weight="700"
+    letter-spacing="3"
+  >
+    SeniSafe
+  </text>
+</svg>
