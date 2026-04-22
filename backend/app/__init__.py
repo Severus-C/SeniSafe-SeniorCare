@@ -1,0 +1,1 @@
+"""SeniSafe FastAPI application package."""

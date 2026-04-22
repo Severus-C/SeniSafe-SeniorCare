@@ -1,0 +1,28 @@
+# Flutter related
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.pub-cache/
+.pub/
+build/
+*.utils
+
+# Android related
+.gradle/
+local.properties
+*.keystore
+*.jks
+
+# Python related
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+env/
+venv/
+.env
+
+# IDE related
+.vscode/
+.idea/
+*.swp
